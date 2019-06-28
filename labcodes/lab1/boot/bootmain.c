@@ -36,11 +36,13 @@
 /* waitdisk - wait for disk ready */
 static void
 waitdisk(void) {
+    // 0x1F7 状态和命令寄存器。操作时先给命令，再读取，如果不是忙状态就从0x1f0端口读数据
     while ((inb(0x1F7) & 0xC0) != 0x40)
         /* do nothing */;
 }
 
-/* readsect - read a single sector at @secno into @dst */
+/* readsect - read a single sector(扇区) at @secno into @dst */
+// 访问第一个硬盘的扇区可设置IO地址寄存器0x1f0-0x1f7实现的
 static void
 readsect(void *dst, uint32_t secno) {
     // wait for disk to be ready
@@ -54,7 +56,7 @@ readsect(void *dst, uint32_t secno) {
     outb(0x1F7, 0x20);                      // cmd 0x20 - read sectors
 
     // wait for disk to be ready
-    waitdisk();
+    waitdisk();    
 
     // read a sector
     insl(0x1F0, dst, SECTSIZE / 4);
@@ -64,6 +66,7 @@ readsect(void *dst, uint32_t secno) {
  * readseg - read @count bytes at @offset from kernel into virtual address @va,
  * might copy more than asked.
  * */
+//readseg  - 将@offset中的@count字节从内核读入虚拟地址@va， 可能会超量拷贝。
 static void
 readseg(uintptr_t va, uint32_t count, uint32_t offset) {
     uintptr_t end_va = va + count;
@@ -85,7 +88,8 @@ readseg(uintptr_t va, uint32_t count, uint32_t offset) {
 /* bootmain - the entry of bootloader */
 void
 bootmain(void) {
-    // read the 1st page off disk
+    // read the 1st page off disk 
+    // 1page = 4KB = 8*512B = 8sector
     readseg((uintptr_t)ELFHDR, SECTSIZE * 8, 0);
 
     // is this a valid ELF?

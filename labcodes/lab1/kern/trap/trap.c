@@ -25,8 +25,10 @@ static void print_ticks() {
  * Must be built at run time because shifted function addresses can't
  * be represented in relocation records.
  * */
-static struct gatedesc idt[256] = {{0}};
+#define INTERRUPT_COUNT 256
+static struct gatedesc idt[INTERRUPT_COUNT] = {{0}};
 
+// idt idt 是段选择子，idt_pd为断案选择子的位置，存在idtr中
 static struct pseudodesc idt_pd = {
     sizeof(idt) - 1, (uintptr_t)idt
 };
@@ -46,6 +48,12 @@ idt_init(void) {
       *     You don't know the meaning of this instruction? just google it! and check the libs/x86.h to know more.
       *     Notice: the argument of lidt is idt_pd. try to find it!
       */
+    extern uintptr_t __vectors[];
+    for (int i=0;i<INTERRUPT_COUNT;i++){
+        SETGATE(idt[i], 0, KERNEL_CS, __vectors[i], DPL_USER);
+        //中断描述符，interrupt/trap,内核代码段，中断子例程地址，用户级别中断
+    }
+    lidt(&idt_pd);
 }
 
 static const char *
@@ -135,10 +143,10 @@ print_regs(struct pushregs *regs) {
 }
 
 /* trap_dispatch - dispatch based on what type of trap occurred */
+uint16_t time_counter=0;
 static void
 trap_dispatch(struct trapframe *tf) {
     char c;
-
     switch (tf->tf_trapno) {
     case IRQ_OFFSET + IRQ_TIMER:
         /* LAB1 YOUR CODE : STEP 3 */
@@ -147,6 +155,10 @@ trap_dispatch(struct trapframe *tf) {
          * (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
          * (3) Too Simple? Yes, I think so!
          */
+        if(time_counter++==TICK_NUM){
+            print_ticks();
+            time_counter=1;
+        }
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
@@ -158,8 +170,33 @@ trap_dispatch(struct trapframe *tf) {
         break;
     //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
     case T_SWITCH_TOU:
+        // 判断系统目前是否在内核态
+        if ((tf->tf_cs & 3) == 0)
+        {
+            // 将段选择子都变成用户模式的
+            tf->tf_cs = USER_CS;
+            tf->tf_fs = USER_CS;
+            tf->tf_ds = USER_DS;
+            tf->tf_ss = USER_DS;
+            tf->tf_es = USER_DS;
+            // 内核态变为用户态不压入esp&SS，所以得手动计算上个函数栈的esp
+            tf->tf_esp = (uint32_t)tf + sizeof(struct trapframe) - 8;
+            // 输入输出访问权能
+            tf->tf_eflags |= FL_IOPL_MASK;
+        }
+        break;
     case T_SWITCH_TOK:
-        panic("T_SWITCH_** ??\n");
+        if ((tf->tf_cs & 3) == 3)
+        {
+            // 将段选择子都变成K模式的
+            tf->tf_cs = KERNEL_CS;
+            tf->tf_fs = KERNEL_CS;
+            tf->tf_ds = KERNEL_DS;
+            tf->tf_ss = KERNEL_DS;
+            tf->tf_es = KERNEL_DS;
+            // 输入输出访问权能
+            tf->tf_eflags &= ~FL_IOPL_MASK;
+        }
         break;
     case IRQ_OFFSET + IRQ_IDE1:
     case IRQ_OFFSET + IRQ_IDE2:
